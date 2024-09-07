@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 import "../contracts/CheddarMinter.sol";
 import "./DeployHelpers.s.sol";
 
+
 contract DeployScript is ScaffoldETHDeploy {
     error InvalidPrivateKey(string);
     string _name = "ChedderToken";
