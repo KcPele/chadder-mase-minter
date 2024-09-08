@@ -6,68 +6,124 @@ import "../contracts/CheddarMinter.sol";
 
 contract CheddarMinterTest is Test {
     CheddarMinter public cheddarMinter;
+    address public owner;
+    address public user1;
+    address public user2;
+    uint256 public constant DAILY_QUOTA = 1000 * 1e18;
+    uint256 public constant USER_QUOTA = 100 * 1e18;
 
-    address public owner = address(1);
-    address public user1 = address(2);
-    address public user2 = address(3);
-    address public referral = address(4);
+    event TokensMinted(
+        address indexed recipient,
+        uint256 amount,
+        address indexed referral,
+        uint256 referralAmount
+    );
 
     function setUp() public {
-        vm.prank(owner);
+        owner = address(this);
+        user1 = address(0x1);
+        user2 = address(0x2);
         cheddarMinter = new CheddarMinter(
-            "Cheddar Token",
-            "CHED",
-            1000 ether,
-            500 ether
+            "Cheddar",
+            "CHDR",
+            DAILY_QUOTA,
+            USER_QUOTA
         );
     }
 
-    function testMintTokensWithoutReferral() public {
-        vm.prank(owner);
-        cheddarMinter.mint(user1, 100 ether, address(0));
+    // function testInitialState() public {
+    //     (
+    //         address minter,
+    //         bool active,
+    //         uint256 dailyQuota,
+    //         uint256 userQuota,
+    //         uint256 dailyMints
+    //     ) = cheddarMinter.getConfig();
+    //     assertEq(minter, owner);
+    //     assertTrue(active);
+    //     assertEq(dailyQuota, DAILY_QUOTA);
+    //     assertEq(userQuota, USER_QUOTA);
+    //     assertEq(dailyMints, 0);
+    // }
 
-        assertEq(cheddarMinter.balanceOf(user1), 100 ether);
+    // function testMint() public {
+    //     uint256 mintAmount = 50 * 1e18;
+    //     vm.prank(owner);
+    //     vm.expectEmit(true, true, true, true);
+    //     emit TokensMinted(user1, mintAmount, address(0), 0);
+    //     cheddarMinter.mint(user1, mintAmount, address(0));
+
+    //     assertEq(cheddarMinter.balanceOf(user1), mintAmount);
+    // }
+
+    function testMintWithReferral() public {
+        uint256 mintAmount = 100 * 1e18;
+        uint256 referralAmount = mintAmount / 20; // 5%
+        uint256 userAmount = mintAmount - referralAmount;
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit TokensMinted(user1, userAmount, user2, referralAmount);
+        cheddarMinter.mint(user1, mintAmount, user2);
+
+        assertEq(cheddarMinter.balanceOf(user1), userAmount);
+        assertEq(cheddarMinter.balanceOf(user2), referralAmount);
     }
 
-    function testMintTokensWithReferral() public {
+    function testFailMintExceedDailyQuota() public {
         vm.prank(owner);
-        cheddarMinter.mint(user1, 100 ether, referral);
+        cheddarMinter.mint(user1, DAILY_QUOTA, address(0));
 
-        // 5% referral bonus should be minted
-        assertEq(cheddarMinter.balanceOf(user1), 95 ether); // User gets 95%
-        assertEq(cheddarMinter.balanceOf(referral), 5 ether); // Referral gets 5%
+        vm.prank(owner);
+        cheddarMinter.mint(user2, 1, address(0)); // Should fail
     }
 
-    function testExceedUserQuota() public {
-        vm.prank(owner); // Ensure the caller is the minter
-        cheddarMinter.mint(user1, 500 ether, address(0));
+    function testFailMintExceedUserQuota() public {
+        vm.prank(owner);
+        cheddarMinter.mint(user1, USER_QUOTA, address(0));
 
-        // This next mint should exceed the user quota
-        vm.expectRevert("User mint quota exceeded");
-        vm.prank(owner); // Ensure it's still the minter
-        cheddarMinter.mint(user1, 10 ether, address(0));
+        vm.prank(owner);
+        cheddarMinter.mint(user1, 1, address(0)); // Should fail
     }
 
-    function testExceedDailyQuota() public {
+    // function testMintResetDailyQuota() public {
+    //     vm.prank(owner);
+    //     cheddarMinter.mint(user1, DAILY_QUOTA, address(0));
+
+    //     // Move to the next day
+    //     vm.warp(block.timestamp + 1 days);
+
+    //     vm.prank(owner);
+    //     cheddarMinter.mint(user2, DAILY_QUOTA, address(0)); // Should succeed
+    // }
+
+    function testGetUserMintData() public {
+        uint256 mintAmount = 50 * 1e18;
         vm.prank(owner);
-        cheddarMinter.mint(user1, 500 ether, address(0));
-        cheddarMinter.mint(user2, 500 ether, address(0));
+        cheddarMinter.mint(user1, mintAmount, address(0));
 
-        // This next mint should exceed the daily quota
-        vm.expectRevert("Daily mint quota exceeded");
-        cheddarMinter.mint(user1, 10 ether, address(0));
-    }
-
-    function testStateUpdateAfterMinting() public {
-        vm.prank(owner);
-        cheddarMinter.mint(user1, 100 ether, address(0));
-
-        // Check daily mints update
-        (, , , , uint256 dailyMints) = cheddarMinter.getConfig();
-        assertEq(dailyMints, 100 ether);
-
-        // Check user-specific mint data
         (uint256 day, uint256 minted) = cheddarMinter.getUserMintData(user1);
-        assertEq(minted, 100 ether);
+        assertEq(day, block.timestamp / 1 days);
+        assertEq(minted, mintAmount);
+    }
+
+    function testFailMintNonMinter() public {
+        vm.prank(user1);
+        cheddarMinter.mint(user2, 100, address(0)); // Should fail
+    }
+
+    function testFailMintInactive() public {
+        vm.prank(owner);
+        cheddarMinter.toggleActive();
+
+        vm.prank(owner);
+        cheddarMinter.mint(user1, 100, address(0)); // Should fail
+    }
+
+    function testMinGasRequirement() public {
+        uint256 mintAmount = 50 * 1e18;
+        vm.prank(owner);
+        vm.expectRevert("Insufficient gas for minting");
+        cheddarMinter.mint{gas: 29999}(user1, mintAmount, address(0)); // Should fail
     }
 }

@@ -40,4 +40,11 @@ contract CheddarToken is ERC20, Ownable {
         active = !active;
         emit ActiveStatusChanged(active);
     }
+
+    /// @notice Allows the minter to mint new tokens
+    /// @param to The address to receive the minted tokens
+    /// @param amount The amount of tokens to mint
+    function mint(address to, uint256 amount) external onlyMinter {
+        _mint(to, amount);
+    }
 }
